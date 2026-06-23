@@ -10,15 +10,41 @@ import {
   FaExclamationTriangle,
 } from 'react-icons/fa';
 
-// Helper parse date (sama dengan backend)
+// ==================== SAME parseExcelDate (sama dengan backend) ====================
+// components/UploadModule.tsx
 const parseExcelDate = (excelSerial: any): string => {
   if (!excelSerial) return '';
-  if (isNaN(Number(excelSerial))) {
-    const d = new Date(excelSerial);
-    return !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : '';
+  if (!isNaN(Number(excelSerial))) {
+    const dateOffset = Number(excelSerial) - 25569;
+    const date = new Date(dateOffset * 86400 * 1000);
+    const timezoneOffset = date.getTimezoneOffset() * 60000;
+    const localDate = new Date(date.getTime() - timezoneOffset);
+    const y = localDate.getFullYear();
+    const m = String(localDate.getMonth() + 1).padStart(2, '0');
+    const d = String(localDate.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
-  const dateOffset = Number(excelSerial) - 25569;
-  return new Date(dateOffset * 86400 * 1000).toISOString().split('T')[0];
+  const str = String(excelSerial).trim();
+  let d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+  }
+  const bulanMap: Record<string, string> = {
+    'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
+    'mei': '05', 'jun': '06', 'jul': '07', 'agu': '08',
+    'sep': '09', 'okt': '10', 'nov': '11', 'des': '12'
+  };
+  const match = str.match(/(\d{1,2})\s+([a-z]{3})\s+(\d{4})/i);
+  if (match) {
+    const day = match[1].padStart(2, '0');
+    const month = bulanMap[match[2].toLowerCase()] || '01';
+    const year = match[3];
+    return `${year}-${month}-${day}`;
+  }
+  return '';
 };
 
 type ModuleType =
@@ -54,7 +80,6 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
     setIsClient(true);
   }, []);
 
-  const isDocumentType = ['sq', 'so', 'sj'].includes(type);
   const isSalesForce = type === 'salesforce-weekly' || type === 'salesforce-monthly';
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -89,32 +114,26 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
     reader.onload = async (e) => {
       try {
         let mappedPayload: any[] = [];
-        let namaGudang = 'RTF'; // default
+        let namaGudang = 'RTF';
         const isCSV = file.name.toLowerCase().endsWith('.csv');
 
-        // ============================================================
-        // 1. PARSING FILE (CSV atau Excel)
-        // ============================================================
+        // ========== PARSING CSV ==========
         if (isSalesForce && isCSV) {
-          // Parse CSV dengan PapaParse
           const csvText = e.target?.result as string;
           const result = Papa.parse(csvText, {
             header: true,
             skipEmptyLines: true,
             trimHeaders: true,
           });
-
           if (result.errors.length > 0) {
             throw new Error('Gagal parsing CSV: ' + result.errors[0].message);
           }
-
           mappedPayload = result.data.filter((row: any) =>
             row.sales_name && row.sales_name.trim() !== ''
           );
-
           setProgress(30);
         } else {
-          // Parse Excel (XLSX)
+          // ========== PARSING EXCEL ==========
           const data = new Uint8Array(e.target?.result as ArrayBuffer);
           const workbook = XLSX.read(data, { type: 'array' });
           const firstSheetName = workbook.SheetNames[0];
@@ -128,7 +147,7 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
           namaGudang = rawRows[0]?.[1] || 'RTF';
           const titleFile = rawRows[1]?.[1] || '';
 
-          // Validasi judul untuk SQ/SO/SJ/Stock
+          // Validasi judul (kecuali Sales Force)
           if (!isSalesForce) {
             let expectedTitle = '';
             if (type === 'sq') expectedTitle = 'Rincian Penawaran Penjualan';
@@ -143,53 +162,7 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
 
           const dataRows = rawRows.slice(5);
 
-          // Mapping sesuai type (SQ, SO, SJ, Stock)
-          if (type === 'sq') {
-            mappedPayload = dataRows
-              .map((row) => ({
-                date_sq: row[3],
-                no_sq: row[1],
-                customer_name: row[5],
-                product_code: row[9],
-                status_sq: row[21],
-                qty_sq: row[13],
-                price: row[17],
-                branch_name: row[19],
-                product_name: row[11],
-                category_name: row[27],
-              }))
-              .filter((r) => r.no_sq && String(r.no_sq).trim() !== '');
-          } else if (type === 'so') {
-            mappedPayload = dataRows
-              .map((row) => ({
-                date_so: row[3],
-                no_so: row[5],
-                no_sq: row[1],
-                product_code: row[7],
-                status_so: row[17],
-                qty_so: row[11],
-                area_name: row[19],
-              }))
-              .filter((r) => r.no_so && String(r.no_so).trim() !== '');
-          } else if (type === 'sj') {
-            mappedPayload = dataRows
-              .map((row) => ({
-                branch_name: row[1],
-                area_name: row[21],
-                date_sj: row[3],
-                no_sj: row[5],
-                date_sq: row[35],
-                no_sq: row[37],
-                date_so: row[31],
-                no_so: row[33],
-                status_sj: row[39],
-                product_code: row[11],
-                qty_sj: row[17],
-              }))
-              .filter((r) => r.no_sj && String(r.no_sj).trim() !== '');
-          } // ==================== DI DALAM reader.onload ====================
-
-          // Mapping berdasarkan type
+          // ========== MAPPING ==========
           if (type === 'sq') {
             mappedPayload = dataRows
               .map((row) => ({
@@ -234,9 +207,12 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
               }))
               .filter((r) => r.no_sj && String(r.no_sj).trim() !== '');
           } else if (type === 'stock') {
+            // 🔥 AMBIL TANGGAL DARI METADATA (B3) !!!
+            const dateStockMeta = rawRows[2]?.[1] || '';
+            const parsedDate = parseExcelDate(dateStockMeta);
             mappedPayload = dataRows
               .map((row) => ({
-                date_stock: parseExcelDate(row[3]), // ✅ PASTIKAN PAKAI parseExcelDate
+                date_stock: parsedDate, // ✅ gunakan metadata, bukan row[3]
                 branch_name: row[1],
                 product_code: row[7],
                 qty_stock: row[11],
@@ -253,9 +229,7 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
         setStep('uploading');
         setStatus({ text: '⏳ Mengirim data ke server...', type: 'info' });
 
-        // ============================================================
-        // 2. STATISTIK
-        // ============================================================
+        // ========== STATISTIK ==========
         let totalUnique = 0;
         let dateField = '';
         if (type === 'sq') {
@@ -278,7 +252,6 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
           dateField = type === 'salesforce-weekly' ? 'week' : 'month';
         }
 
-        // Range tanggal/week/month
         let dateMin = '',
           dateMax = '';
         if (dateField) {
@@ -292,9 +265,7 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
           }
         }
 
-        // ============================================================
-        // 3. DETERMINASI ENDPOINT
-        // ============================================================
+        // ========== DETERMINASI ENDPOINT ==========
         let endpoint = '';
         if (type === 'sq') endpoint = '/api/upload-sq';
         else if (type === 'so') endpoint = '/api/upload-so';
@@ -303,14 +274,12 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
         else if (type === 'salesforce-weekly') endpoint = '/api/upload-salesforce-weekly';
         else if (type === 'salesforce-monthly') endpoint = '/api/upload-salesforce-monthly';
 
-        // ============================================================
-        // 4. KIRIM KE BACKEND DENGAN ERROR HANDLING
-        // ============================================================
+        // ========== KIRIM KE BACKEND ==========
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Warehouse-Name': String(namaGudang || 'RTF'),
+            'X-Warehouse-Name': namaGudang,
           },
           body: JSON.stringify({
             payload: mappedPayload,
@@ -318,7 +287,6 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
           }),
         });
 
-        // 🔥 CEK CONTENT-TYPE SEBELUM PARSE JSON
         const contentType = res.headers.get('content-type');
         if (!contentType || !contentType.includes('application/json')) {
           const text = await res.text();
@@ -331,9 +299,6 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
 
         setProgress(80);
 
-        // ============================================================
-        // 5. DOWNLOAD CSV ERROR (jika ada)
-        // ============================================================
         if (json.skuErrorCsv) {
           const blob = new Blob([json.skuErrorCsv], { type: 'text/csv;charset=utf-8-sig;' });
           const url = URL.createObjectURL(blob);
@@ -345,9 +310,6 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
           document.body.removeChild(link);
         }
 
-        // ============================================================
-        // 6. SELESAI
-        // ============================================================
         setProgress(100);
         setStep('done');
         setLoading(false);
@@ -359,6 +321,7 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
           dateMin,
           dateMax,
           hasSkuError: json.hasSkuError || false,
+          skipped: json.skipped // tambahkan
         });
 
         setStatus({
@@ -378,7 +341,6 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
       }
     };
 
-    // Baca file sesuai ekstensi
     if (file.name.toLowerCase().endsWith('.csv')) {
       reader.readAsText(file);
     } else {
@@ -487,6 +449,7 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
                   </td>
                 </tr>
               )}
+              
             </tbody>
           </table>
         </div>

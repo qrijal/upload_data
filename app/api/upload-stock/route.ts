@@ -1,7 +1,6 @@
 import { NextResponse } from 'next/server';
 import {
   supabase,
-  parseExcelDate,
   cleanIndonesianNumber,
   convertToCsvString,
   fetchValidSkus,
@@ -9,6 +8,42 @@ import {
   fetchBranchCodeMap,
   logUpload,
 } from '../lib/supabase-helpers';
+
+// Helper parse date (sama dengan frontend)
+const parseExcelDate = (excelSerial: any): string | null => {
+  if (!excelSerial) return null;
+  if (!isNaN(Number(excelSerial))) {
+    const dateOffset = Number(excelSerial) - 25569;
+    const date = new Date(dateOffset * 86400 * 1000);
+    const timezoneOffset = date.getTimezoneOffset() * 60000;
+    const localDate = new Date(date.getTime() - timezoneOffset);
+    const y = localDate.getFullYear();
+    const m = String(localDate.getMonth() + 1).padStart(2, '0');
+    const d = String(localDate.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+  const str = String(excelSerial).trim();
+  let d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+  }
+  const bulanMap: Record<string, string> = {
+    'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
+    'mei': '05', 'jun': '06', 'jul': '07', 'agu': '08',
+    'sep': '09', 'okt': '10', 'nov': '11', 'des': '12'
+  };
+  const match = str.match(/(\d{1,2})\s+([a-z]{3})\s+(\d{4})/i);
+  if (match) {
+    const day = match[1].padStart(2, '0');
+    const month = bulanMap[match[2].toLowerCase()] || '01';
+    const year = match[3];
+    return `${year}-${month}-${day}`;
+  }
+  return null;
+};
 
 export async function POST(req: Request) {
   try {
@@ -32,8 +67,10 @@ export async function POST(req: Request) {
       const qty = cleanIndonesianNumber(row.qty_stock);
       const convertedQty = Math.round((qty / factor) * 100) / 100;
 
+      const dateStock = parseExcelDate(row.date_stock);
+
       return {
-        date_stock: parseExcelDate(row.date_stock),
+        date_stock: dateStock,
         branch_code: branchCode,
         product_code: productCodeClean,
         qty_stock: convertedQty,
@@ -42,45 +79,62 @@ export async function POST(req: Request) {
       };
     });
 
-    // 2. Validasi SKU & filter qty > 0
+    // 2. Validasi & filter
+    // - SKU tidak valid → masuk invalidRows (akan di-CSV error)
+    // - Qty <= 0 → diabaikan (tidak diinsert, tidak dicatat error)
+    // - Tanggal tidak valid → diabaikan
     const validRows: any[] = [];
     const invalidRows: any[] = [];
+    let skippedQtyZero = 0;
+    let skippedInvalidDate = 0;
+
     mappedData.forEach(row => {
+      // Cek SKU
       const checkSku = String(row.product_code).toUpperCase();
-      if (validSkus.has(checkSku)) {
-        if (row.qty_stock > 0) {
-          validRows.push(row);
-        }
-        // qty <= 0 diabaikan (tidak masuk error)
-      } else {
-        invalidRows.push(row);
+      if (!validSkus.has(checkSku)) {
+        invalidRows.push({
+          date_stock: row.date_stock || 'INVALID',
+          branch_code: row.branch_code,
+          product_code: row.product_code,
+          qty_stock: row.qty_stock,
+          status: 'SKU tidak terdaftar'
+        });
+        return;
       }
+
+      // Cek qty
+      if (row.qty_stock <= 0) {
+        skippedQtyZero++;
+        return;
+      }
+
+      // Cek tanggal
+      if (!row.date_stock) {
+        skippedInvalidDate++;
+        return;
+      }
+
+      validRows.push(row);
     });
 
+    // 3. Buat CSV error hanya untuk SKU tidak valid (tidak termasuk qty <= 0)
     let skuErrorCsv: string | null = null;
     let hasSkuError = false;
     if (invalidRows.length > 0) {
       hasSkuError = true;
-      const csvData = invalidRows.map(row => ({
-        date_stock: row.date_stock,
-        branch_code: row.branch_code,
-        product_code: row.product_code,
-        qty_stock: row.qty_stock,
-        status: 'SKU tidak terdaftar atau qty <= 0'
-      }));
-      skuErrorCsv = convertToCsvString(csvData, ['date_stock', 'branch_code', 'product_code', 'qty_stock', 'status']);
+      skuErrorCsv = convertToCsvString(invalidRows, ['date_stock', 'branch_code', 'product_code', 'qty_stock', 'status']);
     }
 
     if (validRows.length === 0) {
       return NextResponse.json({
         success: false,
         allFailed: true,
-        message: 'Tidak ada data valid (SKU tidak terdaftar atau qty <= 0).',
+        message: `Tidak ada data valid. SKU invalid: ${invalidRows.length}, Qty<=0: ${skippedQtyZero}, Tanggal invalid: ${skippedInvalidDate}`,
         skuErrorCsv
       });
     }
 
-    // 3. Hapus data lama per kombinasi (date_stock, branch_code)
+    // 4. Hapus data lama per kombinasi (date_stock, branch_code)
     const uniquePairs = new Set<string>();
     validRows.forEach(row => {
       uniquePairs.add(`${row.date_stock}|${row.branch_code}`);
@@ -96,27 +150,31 @@ export async function POST(req: Request) {
       if (deleteErr) throw deleteErr;
     }
 
-    // 4. Insert data baru
+    // 5. Insert data baru
     const { data: insertedData, error: insertErr } = await supabase
       .from('fact_stock')
       .insert(validRows)
       .select('product_code');
     if (insertErr) throw insertErr;
 
-    // 5. Log aktivitas
+    // 6. Log aktivitas
+    const totalSkipped = skippedQtyZero + skippedInvalidDate;
     await logUpload(
       'STOCK',
       fileName,
       insertedData?.length || validRows.length,
       hasSkuError ? 'partial' : 'success',
-      hasSkuError ? 'Beberapa SKU tidak terdaftar atau qty <= 0' : undefined
+      hasSkuError 
+        ? `SKU invalid: ${invalidRows.length}, Qty<=0: ${skippedQtyZero}, Tanggal invalid: ${skippedInvalidDate}` 
+        : `Qty<=0: ${skippedQtyZero}, Tanggal invalid: ${skippedInvalidDate}`
     );
 
     return NextResponse.json({
       success: true,
       count: insertedData?.length || validRows.length,
       hasSkuError,
-      skuErrorCsv
+      skuErrorCsv,
+      skipped: { qtyZero: skippedQtyZero, invalidDate: skippedInvalidDate, invalidSku: invalidRows.length }
     });
 
   } catch (err: any) {

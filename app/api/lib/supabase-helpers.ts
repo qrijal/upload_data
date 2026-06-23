@@ -6,18 +6,57 @@ export const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
 );
 
-// ==================== PARSING & CLEANING ====================
+// ==================== PARSING TANGGAL (DENGAN TEKS & TIMEZONE FIX) ====================
+// app/api/lib/supabase-helpers.ts
 
-export const parseExcelDate = (excelSerial: any): string => {
-  if (!excelSerial) return new Date().toISOString().split('T')[0];
-  if (isNaN(Number(excelSerial))) {
-    const d = new Date(excelSerial);
-    return !isNaN(d.getTime()) ? d.toISOString().split('T')[0] : excelSerial;
+export const parseExcelDate = (excelSerial: any): string | null => {
+  if (!excelSerial) return null;
+
+  // 1. Jika berupa serial number Excel
+  if (!isNaN(Number(excelSerial))) {
+    const dateOffset = Number(excelSerial) - 25569;
+    const date = new Date(dateOffset * 86400 * 1000);
+    // Sesuaikan timezone (misal WIB = UTC+7)
+    const timezoneOffset = date.getTimezoneOffset() * 60000;
+    const localDate = new Date(date.getTime() - timezoneOffset);
+    const y = localDate.getFullYear();
+    const m = String(localDate.getMonth() + 1).padStart(2, '0');
+    const d = String(localDate.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
   }
-  const dateOffset = Number(excelSerial) - 25569;
-  return new Date(dateOffset * 86400 * 1000).toISOString().split('T')[0];
+
+  // 2. Jika berupa string
+  const str = String(excelSerial).trim();
+
+  // Coba parse langsung (YYYY-MM-DD atau MM/DD/YYYY)
+  let d = new Date(str);
+  if (!isNaN(d.getTime())) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${dd}`;
+  }
+
+  // 3. Ekstrak dari teks bahasa Indonesia seperti "Per Tgl. 22 Jun 2026"
+  const bulanMap: Record<string, string> = {
+    'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
+    'mei': '05', 'jun': '06', 'jul': '07', 'agu': '08',
+    'sep': '09', 'okt': '10', 'nov': '11', 'des': '12'
+  };
+
+  // Regex: cari angka 1-2 digit + spasi + 3 huruf + spasi + 4 digit
+  const match = str.match(/(\d{1,2})\s+([a-z]{3})\s+(\d{4})/i);
+  if (match) {
+    const day = match[1].padStart(2, '0');
+    const month = bulanMap[match[2].toLowerCase()] || '01';
+    const year = match[3];
+    return `${year}-${month}-${day}`;
+  }
+
+  return null; // tidak valid
 };
 
+// ==================== PARSING ANGKA INDONESIA ====================
 export const cleanIndonesianNumber = (val: any): number => {
   if (val === null || val === undefined) return 0.0;
   if (typeof val === 'number') return val;
@@ -31,7 +70,6 @@ export const cleanIndonesianNumber = (val: any): number => {
 };
 
 // ==================== AGREGASI (FLEKSIBEL) ====================
-
 export const aggregateData = (
   arr: any[],
   pivotCols: string[],
@@ -54,13 +92,12 @@ export const aggregateData = (
       groups[groupKey] = { row: baseRow, qty: 0, price: 0 };
     }
     groups[groupKey].qty += qty;
-    groups[groupKey].price = price; // harga diambil dari baris terakhir
+    groups[groupKey].price = price;
   });
   return Object.values(groups).map(g => ({ ...g.row, qty: g.qty, price: g.price }));
 };
 
-// ==================== CSV & CONVERT ====================
-
+// ==================== CSV CONVERT ====================
 export const convertToCsvString = (arr: any[], headers: string[]): string => {
   const csvRows = [headers.join(',')];
   for (const row of arr) {
@@ -74,7 +111,6 @@ export const convertToCsvString = (arr: any[], headers: string[]): string => {
 };
 
 // ==================== FETCH MASTER DATA ====================
-
 export const fetchValidSkus = async () => {
   const validSkus = new Set<string>();
   let offset = 0;
@@ -94,6 +130,20 @@ export const fetchValidSkus = async () => {
     } else hasMore = false;
   }
   return validSkus;
+};
+
+export const fetchConvertMap = async () => {
+  const { data, error } = await supabase
+    .from('dim_product')
+    .select('product_code, qty_convert');
+  if (error) throw error;
+  const map = new Map<string, number>();
+  data?.forEach(row => {
+    if (row.product_code) {
+      map.set(String(row.product_code).trim().toUpperCase(), row.qty_convert || 1);
+    }
+  });
+  return map;
 };
 
 export const fetchBranchMap = async () => {
@@ -119,11 +169,11 @@ export const fetchBranchCodeMap = async () => {
   });
   return map;
 };
+
 export const makeKeyProduct = (areaCode: string, productCode: string) =>
   `${areaCode.substring(0, 3)}-${productCode}`;
 
 // ==================== LOGGING ====================
-
 export const logUpload = async (
   module: string,
   fileName: string,
@@ -138,36 +188,4 @@ export const logUpload = async (
     status,
     error_note: errorNote || null,
   });
-};
-
-export const fetchBranchData = async () => {
-  const { data, error } = await supabase
-    .from('dim_branch')
-    .select('branch_name, branch_code, area_name, city_code');
-  if (error) throw error;
-  const areaMap = new Map<string, string>();
-  const branchMap = new Map<string, string>();
-  data?.forEach(row => {
-    if (row.area_name) {
-      areaMap.set(String(row.area_name).trim().toUpperCase(), String(row.city_code).trim());
-    }
-    if (row.branch_name) {
-      branchMap.set(String(row.branch_name).trim().toUpperCase(), String(row.branch_code).trim());
-    }
-  });
-  return { areaMap, branchMap };
-};
-
-export const fetchConvertMap = async () => {
-  const { data, error } = await supabase
-    .from('dim_product')
-    .select('product_code, qty_convert');
-  if (error) throw error;
-  const map = new Map<string, number>();
-  data?.forEach(row => {
-    if (row.product_code) {
-      map.set(String(row.product_code).trim().toUpperCase(), row.qty_convert || 1);
-    }
-  });
-  return map;
 };
