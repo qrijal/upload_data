@@ -13,9 +13,6 @@ import {
   FaBox,
   FaHistory,
   FaSync,
-  FaDatabase,
-  FaPlusCircle,
-  FaUpload,
 } from 'react-icons/fa';
 
 // Import komponen upload
@@ -23,10 +20,11 @@ import UploadSQPage from '@/app/upload-sq/page';
 import UploadSOPage from '@/app/upload-so/page';
 import UploadSJPage from '@/app/upload-sj/page';
 import UploadStockPage from '@/app/upload-stock/page';
-import MasterProductPage from '@/app/master/product/page'; // akan kita buat
+import UploadSalesforceWeeklyPage from '@/app/upload-salesforce-weekly/page';
+import UploadSalesforceMonthlyPage from '@/app/upload-salesforce-monthly/page';
 
 // ============================================================
-// PLACEHOLDER UNTUK MODUL YANG BELUM DIBUAT
+// PLACEHOLDER UNTUK STOCK AGING
 // ============================================================
 function PlaceholderModule({ title, description }: { title: string; description: string }) {
   return (
@@ -39,15 +37,13 @@ function PlaceholderModule({ title, description }: { title: string; description:
   );
 }
 
-const SalesForceWeekly = () => <PlaceholderModule title="Sales Force Weekly" description="Upload dan kelola data sales force mingguan" />;
-const SalesForceMonthly = () => <PlaceholderModule title="Sales Force Monthly" description="Upload dan kelola data sales force bulanan" />;
 const StockAging = () => <PlaceholderModule title="Stock Aging" description="Upload dan kelola data aging stok" />;
 
 // ============================================================
 // DASHBOARD UTAMA
 // ============================================================
 export default function DashboardPage() {
-  const [primaryTab, setPrimaryTab] = useState<'outbound' | 'salesforce' | 'stock' | 'master'>('outbound');
+  const [primaryTab, setPrimaryTab] = useState<'outbound' | 'salesforce' | 'stock'>('outbound');
   const [secondaryTab, setSecondaryTab] = useState<string>('sq');
   const [logs, setLogs] = useState<any[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
@@ -69,12 +65,11 @@ export default function DashboardPage() {
     fetchLogs();
   }, []);
 
-  const handlePrimaryChange = (tab: 'outbound' | 'salesforce' | 'stock' | 'master') => {
+  const handlePrimaryChange = (tab: 'outbound' | 'salesforce' | 'stock') => {
     setPrimaryTab(tab);
     if (tab === 'outbound') setSecondaryTab('sq');
     else if (tab === 'salesforce') setSecondaryTab('weekly');
     else if (tab === 'stock') setSecondaryTab('daily');
-    else if (tab === 'master') setSecondaryTab('product');
   };
 
   const renderContent = () => {
@@ -88,8 +83,8 @@ export default function DashboardPage() {
     }
     if (primaryTab === 'salesforce') {
       switch (secondaryTab) {
-        case 'weekly': return <SalesForceWeekly />;
-        case 'monthly': return <SalesForceMonthly />;
+        case 'weekly': return <UploadSalesforceWeeklyPage />;
+        case 'monthly': return <UploadSalesforceMonthlyPage />;
         default: return null;
       }
     }
@@ -100,13 +95,6 @@ export default function DashboardPage() {
         default: return null;
       }
     }
-    if (primaryTab === 'master') {
-      switch (secondaryTab) {
-        case 'product': return <MasterProductPage />;
-        // case 'branch': return <MasterBranchPage />; // nanti
-        default: return null;
-      }
-    }
     return null;
   };
 
@@ -114,7 +102,6 @@ export default function DashboardPage() {
     { key: 'outbound', label: 'Outbound', icon: <FaBoxes /> },
     { key: 'salesforce', label: 'Sales Force', icon: <FaChartLine /> },
     { key: 'stock', label: 'Stock', icon: <FaWarehouse /> },
-    { key: 'master', label: 'Master Data', icon: <FaDatabase /> },
   ];
 
   const getSecondaryTabs = () => {
@@ -135,12 +122,6 @@ export default function DashboardPage() {
       return [
         { key: 'daily', label: 'Daily Stock', icon: <FaBox /> },
         { key: 'aging', label: 'Stock Aging', icon: <FaHistory /> },
-      ];
-    }
-    if (primaryTab === 'master') {
-      return [
-        { key: 'product', label: 'Product', icon: <FaPlusCircle /> },
-        // { key: 'branch', label: 'Branch', icon: <FaBuilding /> },
       ];
     }
     return [];

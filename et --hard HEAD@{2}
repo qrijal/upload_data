@@ -1,0 +1,16 @@
+[33m1137d4a[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m HEAD@{0}: pull origin main --rebase (finish): returning to refs/heads/main
+[33m1137d4a[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m)[m HEAD@{1}: pull origin main --rebase (start): checkout 1137d4ae725efddaf9f79abb6b9d8481be91c670
+[33m23feba4[m HEAD@{2}: Branch: renamed refs/heads/main to refs/heads/main
+[33m23feba4[m HEAD@{4}: Branch: renamed refs/heads/main to refs/heads/main
+[33m23feba4[m HEAD@{6}: Branch: renamed refs/heads/main to refs/heads/main
+[33m23feba4[m HEAD@{8}: Branch: renamed refs/heads/main to refs/heads/main
+[33m23feba4[m HEAD@{10}: commit: Initial commit
+[33mf39f993[m HEAD@{11}: Branch: renamed refs/heads/main to refs/heads/main
+[33mf39f993[m HEAD@{13}: Branch: renamed refs/heads/main to refs/heads/main
+[33mf39f993[m HEAD@{15}: Branch: renamed refs/heads/main to refs/heads/main
+[33mf39f993[m HEAD@{17}: commit: Initial commit
+[33m376ebb0[m HEAD@{18}: rebase (finish): returning to refs/heads/main
+[33m376ebb0[m HEAD@{19}: rebase (continue): feat: initial upload project
+[33mce12de7[m HEAD@{20}: pull origin main --rebase (start): checkout ce12de749013719afc82eab43fdcb11dec9afb47
+[33mf1251b8[m HEAD@{21}: Branch: renamed refs/heads/main to refs/heads/main
+[33mf1251b8[m HEAD@{23}: commit (initial): feat: initial upload project
