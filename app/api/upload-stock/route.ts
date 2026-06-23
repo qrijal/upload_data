@@ -1,4 +1,3 @@
-// app/api/upload-stock/route.ts
 import { NextResponse } from 'next/server';
 import {
   supabase,
@@ -51,9 +50,8 @@ export async function POST(req: Request) {
       if (validSkus.has(checkSku)) {
         if (row.qty_stock > 0) {
           validRows.push(row);
-        } else {
-          // qty <= 0 diabaikan (tidak masuk error CSV, hanya diabaikan)
         }
+        // qty <= 0 diabaikan (tidak masuk error)
       } else {
         invalidRows.push(row);
       }
@@ -82,14 +80,12 @@ export async function POST(req: Request) {
       });
     }
 
-    // 3. Hapus data lama berdasarkan kombinasi date_stock + branch_code
-    // Ambil pasangan unik (date_stock, branch_code) dari data valid
+    // 3. Hapus data lama per kombinasi (date_stock, branch_code)
     const uniquePairs = new Set<string>();
     validRows.forEach(row => {
       uniquePairs.add(`${row.date_stock}|${row.branch_code}`);
     });
 
-    // Delete per kombinasi (loop) untuk menghindari error filter kompleks
     for (const pair of uniquePairs) {
       const [date, branch] = pair.split('|');
       const { error: deleteErr } = await supabase
@@ -107,7 +103,7 @@ export async function POST(req: Request) {
       .select('product_code');
     if (insertErr) throw insertErr;
 
-    // 5. Catat log
+    // 5. Log aktivitas
     await logUpload(
       'STOCK',
       fileName,

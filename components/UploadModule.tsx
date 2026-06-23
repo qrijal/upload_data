@@ -21,12 +21,12 @@ const parseExcelDate = (excelSerial: any): string => {
   return new Date(dateOffset * 86400 * 1000).toISOString().split('T')[0];
 };
 
-type ModuleType = 
-  | 'sq' 
-  | 'so' 
-  | 'sj' 
-  | 'stock' 
-  | 'salesforce-weekly' 
+type ModuleType =
+  | 'sq'
+  | 'so'
+  | 'sj'
+  | 'stock'
+  | 'salesforce-weekly'
   | 'salesforce-monthly';
 
 export default function UploadModule({ type, title }: { type: ModuleType; title: string }) {
@@ -98,20 +98,20 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
         if (isSalesForce && isCSV) {
           // Parse CSV dengan PapaParse
           const csvText = e.target?.result as string;
-          const result = Papa.parse(csvText, { 
-            header: true, 
+          const result = Papa.parse(csvText, {
+            header: true,
             skipEmptyLines: true,
             trimHeaders: true,
           });
-          
+
           if (result.errors.length > 0) {
             throw new Error('Gagal parsing CSV: ' + result.errors[0].message);
           }
-          
-          mappedPayload = result.data.filter((row: any) => 
+
+          mappedPayload = result.data.filter((row: any) =>
             row.sales_name && row.sales_name.trim() !== ''
           );
-          
+
           setProgress(30);
         } else {
           // Parse Excel (XLSX)
@@ -187,10 +187,56 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
                 qty_sj: row[17],
               }))
               .filter((r) => r.no_sj && String(r.no_sj).trim() !== '');
+          } // ==================== DI DALAM reader.onload ====================
+
+          // Mapping berdasarkan type
+          if (type === 'sq') {
+            mappedPayload = dataRows
+              .map((row) => ({
+                date_sq: parseExcelDate(row[3]),
+                no_sq: row[1],
+                customer_name: row[5],
+                product_code: row[9],
+                status_sq: row[21],
+                qty_sq: row[13],
+                price: row[17],
+                branch_name: row[19],
+                product_name: row[11],
+                category_name: row[27],
+              }))
+              .filter((r) => r.no_sq && String(r.no_sq).trim() !== '');
+          } else if (type === 'so') {
+            mappedPayload = dataRows
+              .map((row) => ({
+                date_so: parseExcelDate(row[3]),
+                no_so: row[5],
+                no_sq: row[1],
+                product_code: row[7],
+                status_so: row[17],
+                qty_so: row[11],
+                area_name: row[19],
+              }))
+              .filter((r) => r.no_so && String(r.no_so).trim() !== '');
+          } else if (type === 'sj') {
+            mappedPayload = dataRows
+              .map((row) => ({
+                branch_name: row[1],
+                area_name: row[21],
+                date_sj: parseExcelDate(row[3]),
+                no_sj: row[5],
+                date_sq: parseExcelDate(row[35]),
+                no_sq: row[37],
+                date_so: parseExcelDate(row[31]),
+                no_so: row[33],
+                status_sj: row[39],
+                product_code: row[11],
+                qty_sj: row[17],
+              }))
+              .filter((r) => r.no_sj && String(r.no_sj).trim() !== '');
           } else if (type === 'stock') {
             mappedPayload = dataRows
               .map((row) => ({
-                date_stock: row[3],
+                date_stock: parseExcelDate(row[3]), // ✅ PASTIKAN PAKAI parseExcelDate
                 branch_name: row[1],
                 product_code: row[7],
                 qty_stock: row[11],
@@ -395,13 +441,12 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
 
       {status.text && (
         <div
-          className={`p-4 rounded-lg text-sm font-medium border text-center ${
-            status.type === 'success'
+          className={`p-4 rounded-lg text-sm font-medium border text-center ${status.type === 'success'
               ? 'bg-green-50 text-green-700 border-green-200'
               : status.type === 'error'
-              ? 'bg-red-50 text-red-700 border-red-200'
-              : 'bg-blue-50 text-blue-700 border-blue-200'
-          }`}
+                ? 'bg-red-50 text-red-700 border-red-200'
+                : 'bg-blue-50 text-blue-700 border-blue-200'
+            }`}
         >
           {status.type === 'success' && <FaCheckCircle className="inline mr-1" />}
           {status.type === 'error' && <FaExclamationTriangle className="inline mr-1" />}
