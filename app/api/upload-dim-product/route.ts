@@ -15,7 +15,7 @@ export async function POST(req: Request) {
     }
 
     // Validasi: product_code wajib
-    const validRows = payload.filter(row => row.product_code && row.product_code.trim() !== '');
+    const validRows = payload.filter((row: any) => row.product_code && row.product_code.trim() !== '');
     if (validRows.length === 0) {
       return NextResponse.json({ error: 'Tidak ada data dengan product_code yang valid' }, { status: 400 });
     }
