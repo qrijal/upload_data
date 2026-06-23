@@ -89,19 +89,29 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
     reader.onload = async (e) => {
       try {
         let mappedPayload: any[] = [];
-        const isCSV = file.name.endsWith('.csv');
+        let namaGudang = 'RTF'; // default
+        const isCSV = file.name.toLowerCase().endsWith('.csv');
 
+        // ============================================================
+        // 1. PARSING FILE (CSV atau Excel)
+        // ============================================================
         if (isSalesForce && isCSV) {
           // Parse CSV dengan PapaParse
           const csvText = e.target?.result as string;
-          const result = Papa.parse(csvText, { header: true, skipEmptyLines: true });
+          const result = Papa.parse(csvText, { 
+            header: true, 
+            skipEmptyLines: true,
+            trimHeaders: true,
+          });
+          
           if (result.errors.length > 0) {
             throw new Error('Gagal parsing CSV: ' + result.errors[0].message);
           }
+          
           mappedPayload = result.data.filter((row: any) => 
             row.sales_name && row.sales_name.trim() !== ''
           );
-          // Set progress 30% setelah parsing
+          
           setProgress(30);
         } else {
           // Parse Excel (XLSX)
@@ -115,7 +125,7 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
             throw new Error('Format tidak sesuai (kurang dari 6 baris).');
           }
 
-          const namaGudang = rawRows[0]?.[1] || '';
+          namaGudang = rawRows[0]?.[1] || 'RTF';
           const titleFile = rawRows[1]?.[1] || '';
 
           // Validasi judul untuk SQ/SO/SJ/Stock
@@ -127,7 +137,7 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
             else if (type === 'stock') expectedTitle = 'Kuantitas Barang per Gudang';
 
             if (String(titleFile).trim() !== expectedTitle) {
-              throw new Error(`Berkas bukan ${expectedTitle} yang valid.`);
+              throw new Error(`Berkas bukan "${expectedTitle}" yang valid.`);
             }
           }
 
@@ -197,7 +207,9 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
         setStep('uploading');
         setStatus({ text: '⏳ Mengirim data ke server...', type: 'info' });
 
-        // Statistik
+        // ============================================================
+        // 2. STATISTIK
+        // ============================================================
         let totalUnique = 0;
         let dateField = '';
         if (type === 'sq') {
@@ -234,7 +246,9 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
           }
         }
 
-        // Tentukan endpoint
+        // ============================================================
+        // 3. DETERMINASI ENDPOINT
+        // ============================================================
         let endpoint = '';
         if (type === 'sq') endpoint = '/api/upload-sq';
         else if (type === 'so') endpoint = '/api/upload-so';
@@ -243,11 +257,14 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
         else if (type === 'salesforce-weekly') endpoint = '/api/upload-salesforce-weekly';
         else if (type === 'salesforce-monthly') endpoint = '/api/upload-salesforce-monthly';
 
+        // ============================================================
+        // 4. KIRIM KE BACKEND DENGAN ERROR HANDLING
+        // ============================================================
         const res = await fetch(endpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Warehouse-Name': 'RTF', // default, sesuaikan jika perlu
+            'X-Warehouse-Name': String(namaGudang || 'RTF'),
           },
           body: JSON.stringify({
             payload: mappedPayload,
@@ -255,11 +272,22 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
           }),
         });
 
+        // 🔥 CEK CONTENT-TYPE SEBELUM PARSE JSON
+        const contentType = res.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+          const text = await res.text();
+          console.error('Response bukan JSON:', text.substring(0, 500));
+          throw new Error(`Server error (${res.status}): ${text.substring(0, 200)}`);
+        }
+
         const json = await res.json();
         if (!res.ok) throw new Error(json.error || 'Server gagal memproses data.');
 
         setProgress(80);
 
+        // ============================================================
+        // 5. DOWNLOAD CSV ERROR (jika ada)
+        // ============================================================
         if (json.skuErrorCsv) {
           const blob = new Blob([json.skuErrorCsv], { type: 'text/csv;charset=utf-8-sig;' });
           const url = URL.createObjectURL(blob);
@@ -271,6 +299,9 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
           document.body.removeChild(link);
         }
 
+        // ============================================================
+        // 6. SELESAI
+        // ============================================================
         setProgress(100);
         setStep('done');
         setLoading(false);
@@ -293,6 +324,7 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
         setFile(null);
         if (fileRef.current) fileRef.current.value = '';
       } catch (err: any) {
+        console.error('Upload Error:', err);
         setProgress(0);
         setStep('error');
         setLoading(false);
@@ -300,7 +332,8 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
       }
     };
 
-    if (file.name.endsWith('.csv')) {
+    // Baca file sesuai ekstensi
+    if (file.name.toLowerCase().endsWith('.csv')) {
       reader.readAsText(file);
     } else {
       reader.readAsArrayBuffer(file);
