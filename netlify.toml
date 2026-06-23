@@ -4,3 +4,7 @@
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
+
+  [functions]
+  node_compat = true
+  timeout = 26
