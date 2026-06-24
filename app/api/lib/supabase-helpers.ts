@@ -189,3 +189,20 @@ export const logUpload = async (
     error_note: errorNote || null,
   });
 };
+export const fetchBranchData = async () => {
+  const { data, error } = await supabase
+    .from('dim_branch')
+    .select('area_name, city_code, branch_name, branch_code');
+  if (error) throw error;
+  const areaMap = new Map<string, string>();
+  const branchMap = new Map<string, string>();
+  data?.forEach(row => {
+    if (row.area_name) {
+      areaMap.set(String(row.area_name).trim().toUpperCase(), String(row.city_code).trim());
+    }
+    if (row.branch_name) {
+      branchMap.set(String(row.branch_name).trim().toUpperCase(), String(row.branch_code).trim());
+    }
+  });
+  return { areaMap, branchMap };
+};
