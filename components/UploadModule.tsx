@@ -8,10 +8,12 @@ import {
   FaSpinner,
   FaCheckCircle,
   FaExclamationTriangle,
+  FaSearch,
+  FaTimes,
+  FaCheck,
 } from 'react-icons/fa';
 
-// ==================== SAME parseExcelDate (sama dengan backend) ====================
-// components/UploadModule.tsx
+// Helper parse date (sama dengan backend)
 const parseExcelDate = (excelSerial: any): string => {
   if (!excelSerial) return '';
   if (!isNaN(Number(excelSerial))) {
@@ -33,9 +35,9 @@ const parseExcelDate = (excelSerial: any): string => {
     return `${y}-${m}-${dd}`;
   }
   const bulanMap: Record<string, string> = {
-    'jan': '01', 'feb': '02', 'mar': '03', 'apr': '04',
-    'mei': '05', 'jun': '06', 'jul': '07', 'agu': '08',
-    'sep': '09', 'okt': '10', 'nov': '11', 'des': '12'
+    jan: '01', feb: '02', mar: '03', apr: '04',
+    mei: '05', jun: '06', jul: '07', agu: '08',
+    sep: '09', okt: '10', nov: '11', des: '12'
   };
   const match = str.match(/(\d{1,2})\s+([a-z]{3})\s+(\d{4})/i);
   if (match) {
@@ -47,15 +49,16 @@ const parseExcelDate = (excelSerial: any): string => {
   return '';
 };
 
-type ModuleType =
-  | 'sq'
-  | 'so'
-  | 'sj'
-  | 'stock'
-  | 'salesforce-weekly'
+type ModuleType = 
+  | 'sq' 
+  | 'so' 
+  | 'sj' 
+  | 'stock' 
+  | 'salesforce-weekly' 
   | 'salesforce-monthly';
 
 export default function UploadModule({ type, title }: { type: ModuleType; title: string }) {
+  // State umum
   const [file, setFile] = useState<File | null>(null);
   const [loading, setLoading] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -71,7 +74,17 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
     dateMin: string;
     dateMax: string;
     hasSkuError?: boolean;
+    skipped?: { qtyZero?: number; invalidDate?: number; invalidSku?: number };
   } | null>(null);
+
+  // State untuk mode update (hanya untuk SQ/SO/SJ)
+  const [updateMode, setUpdateMode] = useState<'partial' | 'full'>('full');
+  const [showModal, setShowModal] = useState(false);
+  const [docList, setDocList] = useState<string[]>([]);
+  const [selectedDocs, setSelectedDocs] = useState<Set<string>>(new Set());
+  const [searchQuery, setSearchQuery] = useState('');
+  const [mappedPayload, setMappedPayload] = useState<any[]>([]);
+  const [namaGudang, setNamaGudang] = useState('');
 
   const fileRef = useRef<HTMLInputElement>(null);
   const [isClient, setIsClient] = useState(false);
@@ -80,6 +93,7 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
     setIsClient(true);
   }, []);
 
+  const isDocumentType = ['sq', 'so', 'sj'].includes(type);
   const isSalesForce = type === 'salesforce-weekly' || type === 'salesforce-monthly';
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -97,6 +111,9 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
     setSummary(null);
     setProgress(0);
     setStep('idle');
+    setSelectedDocs(new Set());
+    setDocList([]);
+    setShowModal(false);
   };
 
   const handleUpload = () => {
@@ -113,48 +130,34 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
     const reader = new FileReader();
     reader.onload = async (e) => {
       try {
-        let mappedPayload: any[] = [];
-        let namaGudang = 'RTF';
+        let payload: any[] = [];
+        let gudang = 'RTF';
         const isCSV = file.name.toLowerCase().endsWith('.csv');
 
-        // ========== PARSING CSV ==========
         if (isSalesForce && isCSV) {
           const csvText = e.target?.result as string;
-          const result = Papa.parse(csvText, {
-            header: true,
-            skipEmptyLines: true,
-            trimHeaders: true,
-          });
-          if (result.errors.length > 0) {
-            throw new Error('Gagal parsing CSV: ' + result.errors[0].message);
-          }
-          mappedPayload = result.data.filter((row: any) =>
-            row.sales_name && row.sales_name.trim() !== ''
-          );
+          const result = Papa.parse(csvText, { header: true, skipEmptyLines: true, trimHeaders: true });
+          if (result.errors.length > 0) throw new Error('Gagal parsing CSV: ' + result.errors[0].message);
+          payload = result.data.filter((row: any) => row.sales_name && row.sales_name.trim() !== '');
           setProgress(30);
         } else {
-          // ========== PARSING EXCEL ==========
           const data = new Uint8Array(e.target?.result as ArrayBuffer);
           const workbook = XLSX.read(data, { type: 'array' });
           const firstSheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[firstSheetName];
           const rawRows = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1, defval: '' });
 
-          if (!rawRows || rawRows.length < 6) {
-            throw new Error('Format tidak sesuai (kurang dari 6 baris).');
-          }
+          if (!rawRows || rawRows.length < 6) throw new Error('Format tidak sesuai (kurang dari 6 baris).');
 
-          namaGudang = rawRows[0]?.[1] || 'RTF';
+          gudang = rawRows[0]?.[1] || 'RTF';
           const titleFile = rawRows[1]?.[1] || '';
 
-          // Validasi judul (kecuali Sales Force)
           if (!isSalesForce) {
             let expectedTitle = '';
             if (type === 'sq') expectedTitle = 'Rincian Penawaran Penjualan';
             else if (type === 'so') expectedTitle = 'Rincian Pesanan Penjualan';
             else if (type === 'sj') expectedTitle = 'Rincian Pengiriman Pesanan';
             else if (type === 'stock') expectedTitle = 'Kuantitas Barang per Gudang';
-
             if (String(titleFile).trim() !== expectedTitle) {
               throw new Error(`Berkas bukan "${expectedTitle}" yang valid.`);
             }
@@ -162,9 +165,9 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
 
           const dataRows = rawRows.slice(5);
 
-          // ========== MAPPING ==========
+          // Mapping berdasarkan type
           if (type === 'sq') {
-            mappedPayload = dataRows
+            payload = dataRows
               .map((row) => ({
                 date_sq: parseExcelDate(row[3]),
                 no_sq: row[1],
@@ -179,7 +182,7 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
               }))
               .filter((r) => r.no_sq && String(r.no_sq).trim() !== '');
           } else if (type === 'so') {
-            mappedPayload = dataRows
+            payload = dataRows
               .map((row) => ({
                 date_so: parseExcelDate(row[3]),
                 no_so: row[5],
@@ -191,7 +194,7 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
               }))
               .filter((r) => r.no_so && String(r.no_so).trim() !== '');
           } else if (type === 'sj') {
-            mappedPayload = dataRows
+            payload = dataRows
               .map((row) => ({
                 branch_name: row[1],
                 area_name: row[21],
@@ -207,12 +210,12 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
               }))
               .filter((r) => r.no_sj && String(r.no_sj).trim() !== '');
           } else if (type === 'stock') {
-            // 🔥 AMBIL TANGGAL DARI METADATA (B3) !!!
+            // Ambil tanggal dari metadata B3
             const dateStockMeta = rawRows[2]?.[1] || '';
             const parsedDate = parseExcelDate(dateStockMeta);
-            mappedPayload = dataRows
+            payload = dataRows
               .map((row) => ({
-                date_stock: parsedDate, // ✅ gunakan metadata, bukan row[3]
+                date_stock: parsedDate,
                 branch_name: row[1],
                 product_code: row[7],
                 qty_stock: row[11],
@@ -221,119 +224,29 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
           }
         }
 
-        if (mappedPayload.length === 0) {
-          throw new Error('Tidak ada data valid di file.');
+        if (payload.length === 0) throw new Error('Tidak ada data valid di file.');
+
+        // Simpan payload dan nama gudang untuk digunakan nanti
+        setMappedPayload(payload);
+        setNamaGudang(gudang);
+
+        // Jika mode partial dan document type, tampilkan modal
+        if (isDocumentType && updateMode === 'partial') {
+          const docField = `no_${type}`;
+          const docs = [...new Set(payload.map((r) => String(r[docField] || '').trim()).filter(Boolean))];
+          setDocList(docs);
+          setSelectedDocs(new Set(docs)); // default semua terpilih
+          setShowModal(true);
+          setLoading(false);
+          setStep('idle');
+          setStatus({ text: `📋 Pilih ${type.toUpperCase()} yang akan diupdate (${docs.length} tersedia)`, type: 'info' });
+          return;
         }
 
-        setProgress(40);
-        setStep('uploading');
-        setStatus({ text: '⏳ Mengirim data ke server...', type: 'info' });
+        // Jika full mode atau bukan document type, langsung upload
+        await processUpload(payload, gudang, []);
 
-        // ========== STATISTIK ==========
-        let totalUnique = 0;
-        let dateField = '';
-        if (type === 'sq') {
-          const uniqueSet = new Set(mappedPayload.map((r) => String(r.no_sq).trim()));
-          totalUnique = uniqueSet.size;
-          dateField = 'date_sq';
-        } else if (type === 'so') {
-          const uniqueSet = new Set(mappedPayload.map((r) => String(r.no_so).trim()));
-          totalUnique = uniqueSet.size;
-          dateField = 'date_so';
-        } else if (type === 'sj') {
-          const uniqueSet = new Set(mappedPayload.map((r) => String(r.no_sj).trim()));
-          totalUnique = uniqueSet.size;
-          dateField = 'date_sj';
-        } else if (type === 'stock') {
-          totalUnique = mappedPayload.length;
-          dateField = 'date_stock';
-        } else if (isSalesForce) {
-          totalUnique = mappedPayload.length;
-          dateField = type === 'salesforce-weekly' ? 'week' : 'month';
-        }
-
-        let dateMin = '',
-          dateMax = '';
-        if (dateField) {
-          const dateStrings = mappedPayload
-            .map((r) => String(r[dateField] || ''))
-            .filter((d) => d.length > 0);
-          if (dateStrings.length > 0) {
-            const sorted = dateStrings.slice().sort();
-            dateMin = sorted[0];
-            dateMax = sorted[sorted.length - 1];
-          }
-        }
-
-        // ========== DETERMINASI ENDPOINT ==========
-        let endpoint = '';
-        if (type === 'sq') endpoint = '/api/upload-sq';
-        else if (type === 'so') endpoint = '/api/upload-so';
-        else if (type === 'sj') endpoint = '/api/upload-sj';
-        else if (type === 'stock') endpoint = '/api/upload-stock';
-        else if (type === 'salesforce-weekly') endpoint = '/api/upload-salesforce-weekly';
-        else if (type === 'salesforce-monthly') endpoint = '/api/upload-salesforce-monthly';
-
-        // ========== KIRIM KE BACKEND ==========
-        const res = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-Warehouse-Name': namaGudang,
-          },
-          body: JSON.stringify({
-            payload: mappedPayload,
-            fileName: file.name,
-          }),
-        });
-
-        const contentType = res.headers.get('content-type');
-        if (!contentType || !contentType.includes('application/json')) {
-          const text = await res.text();
-          console.error('Response bukan JSON:', text.substring(0, 500));
-          throw new Error(`Server error (${res.status}): ${text.substring(0, 200)}`);
-        }
-
-        const json = await res.json();
-        if (!res.ok) throw new Error(json.error || 'Server gagal memproses data.');
-
-        setProgress(80);
-
-        if (json.skuErrorCsv) {
-          const blob = new Blob([json.skuErrorCsv], { type: 'text/csv;charset=utf-8-sig;' });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.href = url;
-          link.download = `${file.name.split('.')[0]}_sku_not_available.csv`;
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        }
-
-        setProgress(100);
-        setStep('done');
-        setLoading(false);
-
-        setSummary({
-          fileName: file.name,
-          totalItems: totalUnique,
-          rowsInserted: json.count || mappedPayload.length,
-          dateMin,
-          dateMax,
-          hasSkuError: json.hasSkuError || false,
-          skipped: json.skipped // tambahkan
-        });
-
-        setStatus({
-          text: `✅ Berhasil upload ${json.count} baris.` +
-            (json.hasSkuError ? ' (beberapa data bermasalah, cek file log)' : ''),
-          type: json.hasSkuError ? 'info' : 'success',
-        });
-
-        setFile(null);
-        if (fileRef.current) fileRef.current.value = '';
       } catch (err: any) {
-        console.error('Upload Error:', err);
         setProgress(0);
         setStep('error');
         setLoading(false);
@@ -348,6 +261,193 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
     }
   };
 
+  const processUpload = async (payload: any[], gudang: string, selectedIds: string[]) => {
+    try {
+      setProgress(40);
+      setStep('uploading');
+      setStatus({ text: '⏳ Mengirim data ke server...', type: 'info' });
+
+      // Statistik
+      let totalUnique = 0;
+      let dateField = '';
+      if (type === 'sq') {
+        const uniqueSet = new Set(payload.map((r) => String(r.no_sq).trim()));
+        totalUnique = uniqueSet.size;
+        dateField = 'date_sq';
+      } else if (type === 'so') {
+        const uniqueSet = new Set(payload.map((r) => String(r.no_so).trim()));
+        totalUnique = uniqueSet.size;
+        dateField = 'date_so';
+      } else if (type === 'sj') {
+        const uniqueSet = new Set(payload.map((r) => String(r.no_sj).trim()));
+        totalUnique = uniqueSet.size;
+        dateField = 'date_sj';
+      } else if (type === 'stock') {
+        totalUnique = payload.length;
+        dateField = 'date_stock';
+      } else if (isSalesForce) {
+        totalUnique = payload.length;
+        dateField = type === 'salesforce-weekly' ? 'week' : 'month';
+      }
+
+      const dateStrings = payload
+        .map((r) => String(r[dateField] || ''))
+        .filter((d) => d.length > 0);
+      let dateMin = '',
+        dateMax = '';
+      if (dateStrings.length > 0) {
+        const sorted = dateStrings.slice().sort();
+        dateMin = sorted[0];
+        dateMax = sorted[sorted.length - 1];
+      }
+
+      // Tentukan endpoint
+      let endpoint = '';
+      if (type === 'sq') endpoint = '/api/upload-sq';
+      else if (type === 'so') endpoint = '/api/upload-so';
+      else if (type === 'sj') endpoint = '/api/upload-sj';
+      else if (type === 'stock') endpoint = '/api/upload-stock';
+      else if (type === 'salesforce-weekly') endpoint = '/api/upload-salesforce-weekly';
+      else if (type === 'salesforce-monthly') endpoint = '/api/upload-salesforce-monthly';
+
+      // Siapkan body
+      const body: any = {
+        payload: payload,
+        fileName: file?.name || 'unknown',
+        updateMode: isDocumentType ? updateMode : undefined,
+        selectedIds: isDocumentType ? selectedIds : undefined,
+      };
+
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Warehouse-Name': String(gudang || 'RTF'),
+        },
+        body: JSON.stringify(body),
+      });
+
+      const contentType = res.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await res.text();
+        console.error('Response bukan JSON:', text.substring(0, 500));
+        throw new Error(`Server error (${res.status}): ${text.substring(0, 200)}`);
+      }
+
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Server gagal memproses data.');
+
+      setProgress(80);
+
+      if (json.skuErrorCsv) {
+        const blob = new Blob([json.skuErrorCsv], { type: 'text/csv;charset=utf-8-sig;' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${file?.name?.split('.')[0] || 'error'}_sku_not_available.csv`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+
+      setProgress(100);
+      setStep('done');
+      setLoading(false);
+      setShowModal(false);
+
+      setSummary({
+        fileName: file?.name || 'unknown',
+        totalItems: totalUnique,
+        rowsInserted: json.count || payload.length,
+        dateMin,
+        dateMax,
+        hasSkuError: json.hasSkuError || false,
+        skipped: json.skipped,
+      });
+
+      setStatus({
+        text: `✅ Berhasil upload ${json.count} baris.` +
+          (json.hasSkuError ? ' (beberapa data bermasalah, cek file log)' : '') +
+          (json.skipped?.qtyZero ? ` (Qty<=0: ${json.skipped.qtyZero})` : ''),
+        type: json.hasSkuError ? 'info' : 'success',
+      });
+
+      setFile(null);
+      if (fileRef.current) fileRef.current.value = '';
+    } catch (err: any) {
+      setProgress(0);
+      setStep('error');
+      setLoading(false);
+      setStatus({ text: `❌ Gagal: ${err.message}`, type: 'error' });
+    }
+  };
+
+  // Handler modal
+  const handleSelectAll = (checked: boolean) => {
+    if (checked) {
+      setSelectedDocs(new Set(docList));
+    } else {
+      setSelectedDocs(new Set());
+    }
+  };
+
+  const handleToggleDoc = (doc: string) => {
+    const newSet = new Set(selectedDocs);
+    if (newSet.has(doc)) {
+      newSet.delete(doc);
+    } else {
+      newSet.add(doc);
+    }
+    setSelectedDocs(newSet);
+  };
+
+  const handleSubmitPartial = () => {
+    if (selectedDocs.size === 0) {
+      setStatus({ text: '⚠️ Pilih minimal satu dokumen untuk diupdate.', type: 'error' });
+      return;
+    }
+    setLoading(true);
+    setShowModal(false);
+    const selectedArray = Array.from(selectedDocs);
+    // Filter payload hanya untuk dokumen yang dipilih
+    const docField = `no_${type}`;
+    const filteredPayload = mappedPayload.filter((r) => 
+      selectedArray.includes(String(r[docField] || '').trim())
+    );
+    processUpload(filteredPayload, namaGudang, selectedArray);
+  };
+
+  const renderUpdateMode = () => {
+    if (!isDocumentType) return null;
+    return (
+      <div className="mb-4">
+        <label className="block text-sm font-medium text-gray-700 mb-2">Mode Update</label>
+        <div className="flex gap-6">
+          <label className="inline-flex items-center">
+            <input
+              type="radio"
+              value="full"
+              checked={updateMode === 'full'}
+              onChange={() => setUpdateMode('full')}
+              className="form-radio"
+            />
+            <span className="ml-2 text-sm">Full (hapus semua {type.toUpperCase()}, ganti semua)</span>
+          </label>
+          <label className="inline-flex items-center">
+            <input
+              type="radio"
+              value="partial"
+              checked={updateMode === 'partial'}
+              onChange={() => setUpdateMode('partial')}
+              className="form-radio"
+            />
+            <span className="ml-2 text-sm">Partial (pilih {type.toUpperCase()} yang diupdate)</span>
+          </label>
+        </div>
+      </div>
+    );
+  };
+
   if (!isClient) return <div className="min-h-screen flex items-center justify-center">Loading Engine...</div>;
 
   return (
@@ -358,6 +458,8 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
       <p className="text-xs text-gray-500 text-center mb-6">
         {isSalesForce ? 'Upload file CSV dengan header yang sesuai' : `Modul Otomatis Pembersihan & Overwrite ${type.toUpperCase()}`}
       </p>
+
+      {renderUpdateMode()}
 
       <div className="border-2 border-dashed border-gray-300 rounded-xl p-6 bg-gray-50 text-center mb-4 transition hover:border-blue-400">
         <input
@@ -403,12 +505,13 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
 
       {status.text && (
         <div
-          className={`p-4 rounded-lg text-sm font-medium border text-center ${status.type === 'success'
+          className={`p-4 rounded-lg text-sm font-medium border text-center ${
+            status.type === 'success'
               ? 'bg-green-50 text-green-700 border-green-200'
               : status.type === 'error'
-                ? 'bg-red-50 text-red-700 border-red-200'
-                : 'bg-blue-50 text-blue-700 border-blue-200'
-            }`}
+              ? 'bg-red-50 text-red-700 border-red-200'
+              : 'bg-blue-50 text-blue-700 border-blue-200'
+          }`}
         >
           {status.type === 'success' && <FaCheckCircle className="inline mr-1" />}
           {status.type === 'error' && <FaExclamationTriangle className="inline mr-1" />}
@@ -425,10 +528,12 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
                 <td className="py-1 font-medium align-top">Nama File</td>
                 <td className="py-1 pl-4 align-top">: {summary.fileName}</td>
               </tr>
-              <tr>
-                <td className="py-1 font-medium align-top">Total Data</td>
-                <td className="py-1 pl-4 align-top">: {summary.totalItems}</td>
-              </tr>
+              {isDocumentType && (
+                <tr>
+                  <td className="py-1 font-medium align-top">Jumlah {type.toUpperCase()}</td>
+                  <td className="py-1 pl-4 align-top">: {summary.totalItems}</td>
+                </tr>
+              )}
               <tr>
                 <td className="py-1 font-medium align-top">Baris Diinsert</td>
                 <td className="py-1 pl-4 align-top">: {summary.rowsInserted}</td>
@@ -441,6 +546,16 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
                   : {summary.dateMin && summary.dateMax ? `${summary.dateMin} s/d ${summary.dateMax}` : 'Tidak tersedia'}
                 </td>
               </tr>
+              {summary.skipped && (
+                <tr>
+                  <td className="py-1 font-medium align-top">Diabaikan</td>
+                  <td className="py-1 pl-4 align-top">
+                    : {summary.skipped.qtyZero ? `Qty<=0: ${summary.skipped.qtyZero}, ` : ''}
+                    {summary.skipped.invalidDate ? `Tgl invalid: ${summary.skipped.invalidDate}, ` : ''}
+                    {summary.skipped.invalidSku ? `SKU invalid: ${summary.skipped.invalidSku}` : ''}
+                  </td>
+                </tr>
+              )}
               {summary.hasSkuError && (
                 <tr>
                   <td className="py-1 font-medium align-top text-amber-600">⚠️ Catatan</td>
@@ -449,9 +564,83 @@ export default function UploadModule({ type, title }: { type: ModuleType; title:
                   </td>
                 </tr>
               )}
-              
             </tbody>
           </table>
+        </div>
+      )}
+
+      {/* Modal Pilihan Dokumen untuk Partial Update */}
+      {showModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white rounded-xl shadow-xl max-w-lg w-full max-h-[90vh] flex flex-col p-6">
+            <div className="flex justify-between items-center mb-4">
+              <h3 className="text-lg font-semibold text-gray-800">
+                Pilih {type.toUpperCase()} untuk Partial Update
+              </h3>
+              <button onClick={() => { setShowModal(false); setLoading(false); }} className="text-gray-500 hover:text-gray-700">
+                <FaTimes />
+              </button>
+            </div>
+
+            <div className="relative mb-3">
+              <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <input
+                type="text"
+                placeholder="Cari nomor..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-1 focus:ring-blue-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-2 mb-3">
+              <input
+                type="checkbox"
+                checked={selectedDocs.size === docList.length && docList.length > 0}
+                onChange={(e) => handleSelectAll(e.target.checked)}
+                className="form-checkbox"
+              />
+              <span className="text-sm text-gray-600">Pilih Semua</span>
+              <span className="text-xs text-gray-400 ml-auto">
+                {selectedDocs.size} dari {docList.length} dipilih
+              </span>
+            </div>
+
+            <div className="flex-1 overflow-y-auto border border-gray-200 rounded-lg p-2 max-h-80">
+              {docList
+                .filter((doc) => doc.toLowerCase().includes(searchQuery.toLowerCase()))
+                .map((doc) => (
+                  <label key={doc} className="flex items-center gap-2 py-1 hover:bg-gray-50 px-2 rounded cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedDocs.has(doc)}
+                      onChange={() => handleToggleDoc(doc)}
+                      className="form-checkbox"
+                    />
+                    <span className="text-sm font-mono">{doc}</span>
+                  </label>
+                ))}
+              {docList.filter((doc) => doc.toLowerCase().includes(searchQuery.toLowerCase())).length === 0 && (
+                <p className="text-gray-500 text-sm text-center py-4">Tidak ada hasil</p>
+              )}
+            </div>
+
+            <div className="flex gap-3 mt-4 pt-3 border-t border-gray-200">
+              <button
+                onClick={handleSubmitPartial}
+                disabled={selectedDocs.size === 0}
+                className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 font-medium flex items-center justify-center gap-2"
+              >
+                <FaCheck /> Update Terpilih ({selectedDocs.size})
+              </button>
+              <button
+                onClick={() => { setShowModal(false); setLoading(false); }}
+                className="flex-1 px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 font-medium"
+              >
+                Batal
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

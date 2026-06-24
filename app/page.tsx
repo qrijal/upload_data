@@ -13,6 +13,7 @@ import {
   FaBox,
   FaHistory,
   FaSync,
+  FaDatabase,
 } from 'react-icons/fa';
 
 // Import komponen upload
@@ -22,9 +23,10 @@ import UploadSJPage from '@/app/upload-sj/page';
 import UploadStockPage from '@/app/upload-stock/page';
 import UploadSalesforceWeeklyPage from '@/app/upload-salesforce-weekly/page';
 import UploadSalesforceMonthlyPage from '@/app/upload-salesforce-monthly/page';
+import MasterProductPage from '@/app/master/product/page'; // akan kita buat
 
 // ============================================================
-// PLACEHOLDER UNTUK STOCK AGING
+// PLACEHOLDER
 // ============================================================
 function PlaceholderModule({ title, description }: { title: string; description: string }) {
   return (
@@ -43,7 +45,7 @@ const StockAging = () => <PlaceholderModule title="Stock Aging" description="Upl
 // DASHBOARD UTAMA
 // ============================================================
 export default function DashboardPage() {
-  const [primaryTab, setPrimaryTab] = useState<'outbound' | 'salesforce' | 'stock'>('outbound');
+  const [primaryTab, setPrimaryTab] = useState<'outbound' | 'salesforce' | 'stock' | 'master'>('outbound');
   const [secondaryTab, setSecondaryTab] = useState<string>('sq');
   const [logs, setLogs] = useState<any[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
@@ -65,11 +67,12 @@ export default function DashboardPage() {
     fetchLogs();
   }, []);
 
-  const handlePrimaryChange = (tab: 'outbound' | 'salesforce' | 'stock') => {
+  const handlePrimaryChange = (tab: 'outbound' | 'salesforce' | 'stock' | 'master') => {
     setPrimaryTab(tab);
     if (tab === 'outbound') setSecondaryTab('sq');
     else if (tab === 'salesforce') setSecondaryTab('weekly');
     else if (tab === 'stock') setSecondaryTab('daily');
+    else if (tab === 'master') setSecondaryTab('product');
   };
 
   const renderContent = () => {
@@ -95,6 +98,12 @@ export default function DashboardPage() {
         default: return null;
       }
     }
+    if (primaryTab === 'master') {
+      switch (secondaryTab) {
+        case 'product': return <MasterProductPage />;
+        default: return null;
+      }
+    }
     return null;
   };
 
@@ -102,6 +111,7 @@ export default function DashboardPage() {
     { key: 'outbound', label: 'Outbound', icon: <FaBoxes /> },
     { key: 'salesforce', label: 'Sales Force', icon: <FaChartLine /> },
     { key: 'stock', label: 'Stock', icon: <FaWarehouse /> },
+    { key: 'master', label: 'Master Data', icon: <FaDatabase /> },
   ];
 
   const getSecondaryTabs = () => {
@@ -122,6 +132,11 @@ export default function DashboardPage() {
       return [
         { key: 'daily', label: 'Daily Stock', icon: <FaBox /> },
         { key: 'aging', label: 'Stock Aging', icon: <FaHistory /> },
+      ];
+    }
+    if (primaryTab === 'master') {
+      return [
+        { key: 'product', label: 'Product', icon: <FaBox /> },
       ];
     }
     return [];
